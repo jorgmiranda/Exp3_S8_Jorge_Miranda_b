@@ -1,6 +1,9 @@
 package com.sumativa.b.consultorio.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.hateoas.CollectionModel;
+import org.springframework.hateoas.EntityModel;
+import org.springframework.hateoas.server.mvc.WebMvcLinkBuilder;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,6 +23,7 @@ import com.sumativa.b.consultorio.service.PacienteService;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,55 +40,67 @@ public class ConsultaMedicaController {
     private PacienteService pacienteService;
 
     @GetMapping
-    public List<ConsultaMedica> getAllConsultaMedica(){
-        return consultaMedicaService.getAllConsultaMedica();
+    public CollectionModel<EntityModel<ConsultaMedica>> getAllConsultaMedica(){
+        List<ConsultaMedica> consultas = consultaMedicaService.getAllConsultaMedica();
+        
+        List<EntityModel<ConsultaMedica>> consultaResources = consultas.stream()
+                .map(consulta -> EntityModel.of(consulta,
+                    WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getConsultaMedicaByID(consulta.getId())).withSelfRel()
+                    ))
+                .collect(Collectors.toList());
+        WebMvcLinkBuilder linkTo = WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAllConsultaMedica());
+        CollectionModel<EntityModel<ConsultaMedica>> resourses = CollectionModel.of(consultaResources, linkTo.withRel("consultas"));
+
+        return resourses;
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Object> getConsultaMedicaByID(@PathVariable Long id) {
+    public EntityModel<ConsultaMedica> getConsultaMedicaByID(@PathVariable Long id) {
         Optional<ConsultaMedica> consulta = consultaMedicaService.getConsultaMedicaById(id);
-        if(consulta.isEmpty()){
+        if(consulta.isPresent()){
+            return EntityModel.of(consulta.get(),
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getConsultaMedicaByID(id)).withSelfRel(),
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAllConsultaMedica()).withRel("all-consultasMedicas"));
+        }else {
             log.error("No se encontro ninguna consulta medica con ese ID {} ", id);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ninguna consulta medica con ese ID"));
+            throw new NotFoundException("No se encontro ninguna consulta medica con ese ID: " + id);
         }
-        return ResponseEntity.ok(consulta);
     }
 
     @PostMapping
-    public ResponseEntity<Object> crearConsultaMedica(@RequestBody ConsultaMedicaDTO consultaMedica){
+    public EntityModel<ConsultaMedica> crearConsultaMedica(@RequestBody ConsultaMedicaDTO consultaMedica){
         // se valida que el campo id paciente no este vacio
         if(consultaMedica.getIdPaciente() == null){
             log.error("El ID Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar el ID del paciente antes de crear una atencion medica"));
+            throw new BadRequestException("Debe ingresar el ID del paciente antes de crear una Consulta medica");
         }
 
         // Se busca el paciente segun el id entregado
         Optional<Paciente> buscarPaciente = pacienteService.getPacienteById(consultaMedica.getIdPaciente());
         if(buscarPaciente.isEmpty()){
             log.error("No se encontro un Paciente con el ID {} entregado", consultaMedica.getIdPaciente());
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ningun Paciente con ese ID"));
-           
+            throw new NotFoundException("No se encontro ningun Paciente con ese ID");
         }
 
         // Validaciones adicionales
         if(consultaMedica.getFecha() == null){
             log.error("La fecha de atención es obligatoria");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("La fecha de atención es obligatoria"));
+            throw new BadRequestException("La fecha de atención es obligatoria");
         }
 
-        if(consultaMedica.getMotivoConsulta() == null){
+        if(consultaMedica.getMotivoConsulta() == null || consultaMedica.getMotivoConsulta().isEmpty()){
             log.error("El motivo de la consulta es obligatorio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("El motivo de la consulta es obligatorio"));
+            throw new BadRequestException("El motivo de la consulta es obligatorio");
         }
 
-        if(consultaMedica.getTratamiento() == null){
+        if(consultaMedica.getTratamiento() == null || consultaMedica.getTratamiento().isEmpty()){
             log.error("El tratamiento es obligatorio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("El tratamiento es obligatorio"));
+            throw new BadRequestException("El tratamiento es obligatorio");
         }
 
-        if(consultaMedica.getDiagnostico() == null){
+        if(consultaMedica.getDiagnostico() == null || consultaMedica.getDiagnostico().isEmpty()){
             log.error("El diagnostico es obligatorio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("El diagnostico es obligatorio"));
+            throw new BadRequestException("El diagnostico es obligatorio");
         }
 
         ConsultaMedica consultaCreada = new ConsultaMedica();
@@ -97,53 +113,55 @@ public class ConsultaMedicaController {
         ConsultaMedica c = consultaMedicaService.crearConsultaMedica(consultaCreada);
         if(c == null){
             log.error("Error al crear la Consulta medica");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Error al crear la Consulta medica"));
+            throw new BadRequestException("Error al crear la Consulta medica");
         }
-        return ResponseEntity.ok(c);
+        return EntityModel.of(c,
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getConsultaMedicaByID(c.getId())).withSelfRel(),
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAllConsultaMedica()).withRel("all-consultasMedicas"));
 
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Object> actualizarConsultaMedica(@PathVariable Long id, @RequestBody ConsultaMedicaDTO consultaMedica){
+    public EntityModel<ConsultaMedica> actualizarConsultaMedica(@PathVariable Long id, @RequestBody ConsultaMedicaDTO consultaMedica){
         // se valida que el campo id paciente no este vacio
         if(consultaMedica.getIdPaciente() == null){
             log.error("El ID Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar el ID del paciente antes de crear una atencion medica"));
+            throw new BadRequestException("Debe ingresar el ID del paciente antes de crear una Consulta medica");
         }
 
         // Se busca el paciente segun el id entregado
         Optional<Paciente> buscarPaciente = pacienteService.getPacienteById(consultaMedica.getIdPaciente());
         if(buscarPaciente.isEmpty()){
             log.error("No se encontro un Paciente con el ID {} entregado", consultaMedica.getIdPaciente());
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ningun Paciente con ese ID"));
+            throw new NotFoundException("No se encontro ningun Paciente con ese ID");
            
         }
         //Se busca la consulta media segun el id ingresado
         Optional<ConsultaMedica> consulta = consultaMedicaService.getConsultaMedicaById(id);
         if(consulta.isEmpty()){
             log.error("No se encontro ninguna consulta medica con ese ID {} ", id);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ninguna consulta medica con ese ID"));
+            throw new NotFoundException("No se encontro ninguna consulta medica con ese ID");
         }
 
         // Validaciones adicionales
         if(consultaMedica.getFecha() == null){
             log.error("La fecha de atención es obligatoria");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("La fecha de atención es obligatoria"));
+            throw new BadRequestException("La fecha de atención es obligatoria");
         }
 
-        if(consultaMedica.getMotivoConsulta() == null){
+        if(consultaMedica.getMotivoConsulta() == null || consultaMedica.getMotivoConsulta().isEmpty()){
             log.error("El motivo de la consulta es obligatorio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("El motivo de la consulta es obligatorio"));
+            throw new BadRequestException("El motivo de la consulta es obligatorio");
         }
 
-        if(consultaMedica.getTratamiento() == null){
+        if(consultaMedica.getTratamiento() == null || consultaMedica.getTratamiento().isEmpty()){
             log.error("El tratamiento es obligatorio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("El tratamiento es obligatorio"));
+            throw new BadRequestException("El tratamiento es obligatorio");
         }
 
-        if(consultaMedica.getDiagnostico() == null){
+        if(consultaMedica.getDiagnostico() == null || consultaMedica.getDiagnostico().isEmpty()){
             log.error("El diagnostico es obligatorio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("El diagnostico es obligatorio"));
+            throw new BadRequestException("El diagnostico es obligatorio");
         }
 
         ConsultaMedica consultaEditada = new ConsultaMedica();
@@ -155,7 +173,9 @@ public class ConsultaMedicaController {
 
         ConsultaMedica c = consultaMedicaService.actualizarConsultaMedica(id, consultaEditada);
 
-        return ResponseEntity.ok(c);
+        return EntityModel.of(c,
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getConsultaMedicaByID(id)).withSelfRel(),
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAllConsultaMedica()).withRel("all-consultasMedicas"));
     }
 
     @DeleteMapping("/{id}")
