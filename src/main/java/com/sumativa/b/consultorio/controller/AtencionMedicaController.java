@@ -1,6 +1,9 @@
 package com.sumativa.b.consultorio.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.hateoas.CollectionModel;
+import org.springframework.hateoas.EntityModel;
+import org.springframework.hateoas.server.mvc.WebMvcLinkBuilder;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,6 +23,7 @@ import com.sumativa.b.consultorio.service.PacienteService;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,44 +41,58 @@ public class AtencionMedicaController {
     private PacienteService pacienteService;
 
     @GetMapping
-    public List<AtencionMedica> getAllAtencionMedica(){
-        return atencionMedicaService.getAllAtencionMedica();
+    public CollectionModel<EntityModel<AtencionMedica>> getAllAtencionMedica(){
+        List<AtencionMedica> atenciones = atencionMedicaService.getAllAtencionMedica();
+
+        List<EntityModel<AtencionMedica>> atencionResources = atenciones.stream()
+                .map(atencion -> EntityModel.of(atencion,
+                    WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAtencionMedicaByID(atencion.getId())).withSelfRel()
+                    ))
+                .collect(Collectors.toList());
+        WebMvcLinkBuilder linkTo = WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAllAtencionMedica());
+        CollectionModel<EntityModel<AtencionMedica>> resourses = CollectionModel.of(atencionResources, linkTo.withRel("atencionesMedicas"));
+
+        return resourses;
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Object> getAtencionMedicaByID(@PathVariable Long id) {
+    public EntityModel<AtencionMedica> getAtencionMedicaByID(@PathVariable Long id) {
         Optional<AtencionMedica> atencion = atencionMedicaService.getAtencionMedicaById(id);
-        if(atencion.isEmpty()){
+        if(atencion.isPresent()){
+            return EntityModel.of(atencion.get(),
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAtencionMedicaByID(id)).withSelfRel(),
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAllAtencionMedica()).withRel("all-atencionesMedicas"));
+        }else {
             log.error("No se encontro ninguna atención medica con ese ID {} ", id);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ninguna atención medicacon ese ID"));
+            throw new NotFoundException("No se encontro ninguna atención medica con ese ID: " + id);
         }
-        return ResponseEntity.ok(atencion);
     }
     
 
     @PostMapping
-    public ResponseEntity<Object> crearAtencionMedica(@RequestBody AtencionMedicaDTO atencionMedica){
+    public EntityModel<AtencionMedica> crearAtencionMedica(@RequestBody AtencionMedicaDTO atencionMedica){
         // se valida que el campo id paciente no este vacio
         if(atencionMedica.getIdPaciente() == null){
             log.error("El ID Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar el ID del paciente antes de crear una atencion medica"));
+            throw new BadRequestException("Debe ingresar el ID del paciente antes de crear una atencion medica ");
         }
         // Se busca el paciente segun el id entregado
         Optional<Paciente> buscarPaciente = pacienteService.getPacienteById(atencionMedica.getIdPaciente());
         if(buscarPaciente.isEmpty()){
             log.error("No se encontro un Paciente con el ID {} entregado", atencionMedica.getIdPaciente());
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ningun Paciente con ese ID"));
+            throw new NotFoundException("No se encontro ningun Usuario con ese ID");
+           
            
         }
         // Validaciones adicionales
         if(atencionMedica.getFecha() == null){
             log.error("La fecha de atención es obligatoria");
-            return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).body(new ErrorResponse("La fecha de atención es obligatoria"));
+            throw new BadRequestException("La fecha de atención es obligatoria ");
         }
 
-        if(atencionMedica.getTipo() == null){
+        if(atencionMedica.getTipo() == null || atencionMedica.getTipo().isEmpty()){
             log.error("El tipo de atención es obligatorio");
-            return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).body(new ErrorResponse("El tipo de atención es obligatorio"));
+            throw new BadRequestException("El tipo de atención es obligatorio ");
         }
 
         AtencionMedica atencionCreada = new AtencionMedica();
@@ -86,26 +104,28 @@ public class AtencionMedicaController {
         AtencionMedica a = atencionMedicaService.crearAtencionMedica(atencionCreada);
         if(a == null){
             log.error("Error al crear la atención medica");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Error al crear la atención medica"));
+            throw new BadRequestException("Error al crear la atención medica");
         }
 
-        return ResponseEntity.ok(a);
+        return EntityModel.of(a,
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAtencionMedicaByID(a.getId())).withSelfRel(),
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAllAtencionMedica()).withRel("all-atencionesMedicas"));
 
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Object> actualizarAtencionMedica(@PathVariable Long id, @RequestBody AtencionMedicaDTO atencionMedica){
+    public EntityModel<AtencionMedica> actualizarAtencionMedica(@PathVariable Long id, @RequestBody AtencionMedicaDTO atencionMedica){
         // se valida que el campo id paciente no este vacio
         if(atencionMedica.getIdPaciente() == null){
             log.error("El ID Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar el ID del paciente antes de crear una atencion medica"));
+            throw new BadRequestException("Debe ingresar el ID del paciente antes de crear una atencion medica");
         }
 
         // Se busca el paciente segun el id entregado
         Optional<Paciente> buscarPaciente = pacienteService.getPacienteById(atencionMedica.getIdPaciente());
         if(buscarPaciente.isEmpty()){
             log.error("No se encontro un Paciente con el ID {} entregado", atencionMedica.getIdPaciente());
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ningun Paciente con ese ID"));
+            throw new NotFoundException("No se encontro ningun Paciente con ese ID: " + atencionMedica.getIdPaciente());
            
         }
 
@@ -113,18 +133,18 @@ public class AtencionMedicaController {
         Optional<AtencionMedica> atencion = atencionMedicaService.getAtencionMedicaById(id);
         if(atencion.isEmpty()){
             log.error("No se encontro ninguna atención medica con ese ID {} ", id);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ninguna atención medica con ese ID"));
+            throw new NotFoundException("No se encontro ninguna atención medica con ese ID: " + id);
         }
 
         // Validaciones adicionales
         if(atencionMedica.getFecha() == null){
             log.error("La fecha de atención es obligatoria");
-            return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).body(new ErrorResponse("La fecha de atención es obligatoria"));
+            throw new BadRequestException("La fecha de atención es obligatoria ");
         }
 
-        if(atencionMedica.getTipo() == null){
+        if(atencionMedica.getTipo() == null || atencionMedica.getTipo().isEmpty()){
             log.error("El tipo de atención es obligatorio");
-            return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).body(new ErrorResponse("El tipo de atención es obligatorio"));
+            throw new BadRequestException("El tipo de atención es obligatorio");
         }
 
         AtencionMedica atencionEditada  = new AtencionMedica();
@@ -135,7 +155,9 @@ public class AtencionMedicaController {
         
         AtencionMedica a = atencionMedicaService.actualizarAtencionMedica(id, atencionEditada);
 
-        return ResponseEntity.ok(a);
+        return EntityModel.of(a,
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAtencionMedicaByID(a.getId())).withSelfRel(),
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getAllAtencionMedica()).withRel("all-atencionesMedicas"));
     }
 
     @DeleteMapping("/{id}")
