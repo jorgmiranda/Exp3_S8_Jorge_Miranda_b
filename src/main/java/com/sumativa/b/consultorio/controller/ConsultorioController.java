@@ -2,6 +2,7 @@ package com.sumativa.b.consultorio.controller;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.springframework.web.bind.annotation.RestController;
 
@@ -13,6 +14,10 @@ import com.sumativa.b.consultorio.service.ConsultaMedicaService;
 import com.sumativa.b.consultorio.service.PacienteService;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.hateoas.CollectionModel;
+import org.springframework.hateoas.EntityModel;
+import org.springframework.hateoas.Link;
+import org.springframework.hateoas.server.mvc.WebMvcLinkBuilder;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -42,83 +47,127 @@ public class ConsultorioController {
     private AtencionMedicaService atencionMedicaService;
 
     @GetMapping
-    public List<Paciente> getPacientes() {
-        return pacienteService.getAllPaciente();
+    public CollectionModel<EntityModel<Paciente>> getPacientes() {
+        List<Paciente> pacientes = pacienteService.getAllPaciente();
+        
+        List<EntityModel<Paciente>> pacienteResources = pacientes.stream()
+                .map(paciente -> EntityModel.of(paciente,
+                    WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getPacienteById(paciente.getId())).withSelfRel()
+                    ))
+                .collect(Collectors.toList());
+        WebMvcLinkBuilder linkTo = WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getPacientes());
+        CollectionModel<EntityModel<Paciente>> resourses = CollectionModel.of(pacienteResources, linkTo.withRel("pacientes"));
+
+        return resourses;
     }
     
     @GetMapping("/{id}")
-    public ResponseEntity<Object> getPacienteById(@PathVariable Long id) {
+    public EntityModel<Paciente> getPacienteById(@PathVariable Long id) {
         Optional<Paciente> paciente = pacienteService.getPacienteById(id);
-        if(paciente.isEmpty()){
+        if(paciente.isPresent()){
+            return EntityModel.of(paciente.get(),
+            WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getPacienteById(id)).withSelfRel(),
+            WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getPacientes()).withRel("all-pacientes"));
+        }else{
             log.error("No se encontro ningun Paciente con ese ID {} ", id);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ningun Paciente con ese ID"));
+            throw new NotFoundException("No se encontro ningun Paciente con ese ID: " + id);
         }
-        return ResponseEntity.ok(paciente.get());
+        
     }
     
     
     @GetMapping("/{id}/consultas")
-    public ResponseEntity<Object> getConsultasPaciente(@PathVariable Long id) {
+    public CollectionModel<EntityModel<ConsultaMedica>> getConsultasPaciente(@PathVariable Long id) {
         Optional<Paciente> paciente = pacienteService.getPacienteById(id);
-        if(paciente.isEmpty()){
+        if(paciente.isPresent()){
+            List<ConsultaMedica> consultas = paciente.get().getConsultas();
+
+            List<EntityModel<ConsultaMedica>> consultaModel = consultas.stream()
+                .map(consulta -> EntityModel.of(consulta,
+                    WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(ConsultaMedicaController.class).getConsultaMedicaByID(consulta.getId())).withSelfRel()
+                ))
+                .collect(Collectors.toList());
+            
+            Link selfLink = WebMvcLinkBuilder.linkTo(
+                WebMvcLinkBuilder.methodOn(this.getClass()).getConsultasPaciente(id)
+            ).withSelfRel();
+
+            Link pacientesLink = WebMvcLinkBuilder.linkTo(
+                WebMvcLinkBuilder.methodOn(this.getClass()).getPacientes()
+            ).withSelfRel();
+
+            return CollectionModel.of(consultaModel, selfLink, pacientesLink);
+        }else {
             log.error("No se encontro ningun Paciente con ese ID {} ", id);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ningun Paciente con ese ID"));
+            throw new NotFoundException("No se encontro ningun Paciente con ese ID: " + id);
         }
-        return ResponseEntity.ok(paciente.get().getConsultas());
+        
     }
 
     @GetMapping("/{id}/atenciones")
-    public ResponseEntity<Object> getAtencionesPaciente(@PathVariable Long id) {
+    public CollectionModel<EntityModel<AtencionMedica>> getAtencionesPaciente(@PathVariable Long id) {
         Optional<Paciente> paciente = pacienteService.getPacienteById(id);
-        if(paciente.isEmpty()){
+        if(paciente.isPresent()){
+            List<AtencionMedica> atenciones = paciente.get().getAtenciones();
+
+            List<EntityModel<AtencionMedica>> atencionModel = atenciones.stream()
+                .map(atencion -> EntityModel.of(atencion,
+                    WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(AtencionMedicaController.class).getAtencionMedicaByID(atencion.getId())).withSelfRel()
+                ))
+                .collect(Collectors.toList());
+            
+            Link selfLink = WebMvcLinkBuilder.linkTo(
+                WebMvcLinkBuilder.methodOn(this.getClass()).getConsultasPaciente(id)
+            ).withSelfRel();
+
+            Link pacientesLink = WebMvcLinkBuilder.linkTo(
+                WebMvcLinkBuilder.methodOn(this.getClass()).getPacientes()
+            ).withSelfRel();
+
+            return CollectionModel.of(atencionModel, selfLink, pacientesLink);
+        }else {
             log.error("No se encontro ningun Paciente con ese ID {} ", id);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ningun Paciente con ese ID"));
+            throw new NotFoundException("No se encontro ningun Paciente con ese ID: " + id);
         }
-        return ResponseEntity.ok(paciente.get().getAtenciones());
-    }
-    
-    @GetMapping("/pacientes/contar")
-    public int getCantidadPacientes() {
-        List<Paciente> pacientes = pacienteService.getAllPaciente();
-        return pacientes.size();
     }
 
     @PostMapping
-    public ResponseEntity<Object> crearPaciente(@RequestBody Paciente paciente){
+    public EntityModel<Paciente> crearPaciente(@RequestBody Paciente paciente){
          // se valida que el campo nombre no este vacio
-         if(paciente.getNombre() == null){
+         if(paciente.getNombre() == null || paciente.getNombre().isEmpty()){
             log.error("El Nombre Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar el nombre del paciente"));
+            throw new BadRequestException("Debe ingresar el nombre del paciente");
         }
 
         // se valida que el campo Rut no este vacio
-        if(paciente.getRut() == null){
+        if(paciente.getRut() == null || paciente.getRut().isEmpty()){
             log.error("El Rut del Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar el rut del paciente"));
+            throw new BadRequestException("Debe ingresar el rut del paciente");
+            
         }
 
          // se valida que el campo dirección no este vacio
-        if(paciente.getDireccion() == null){
+        if(paciente.getDireccion() == null || paciente.getDireccion().isEmpty()){
             log.error("La dirección del Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar la direccion del paciente"));
+            throw new BadRequestException("Debe ingresar la direccion del paciente");
         }
 
          // se valida que el campo fecha de nacimiento no este vacio
         if(paciente.getFechaNacimeinto() == null){
             log.error("La fecha de nacimiento del  Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar la fecha de nacimiento del paciente"));
+            throw new BadRequestException("Debe ingresar la fecha de nacimiento del paciente");
         }
 
          // se valida que el campo correo no este vacio
-         if(paciente.getCorreo() == null){
+         if(paciente.getCorreo() == null || paciente.getCorreo().isEmpty()){
             log.error("El correo del Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar el correo del paciente"));
+            throw new BadRequestException("Debe ingresar el correo del paciente");
         }
 
         Paciente pacienteCreado = pacienteService.crearPaciente(paciente);
         if(pacienteCreado == null){
-            log.error("Error al crear el Usuario");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Error al crear el Usuario"));
+            log.error("Error al crear el Paciente");
+            throw new BadRequestException("Error al crear el Paciente");
         }
 
         // Asignar atenciones si estas son creadas con el paciente
@@ -137,8 +186,11 @@ public class ConsultorioController {
             }   
         }
 
-        return ResponseEntity.ok(pacienteCreado);
+        return EntityModel.of(pacienteCreado,
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getPacienteById(pacienteCreado.getId())).withSelfRel(),
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getPacientes()).withRel("all-pacientes"));
     }
+    
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Object> eliminarPaciente(@PathVariable Long id){
@@ -152,42 +204,42 @@ public class ConsultorioController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Object> actualizarPaciente(@PathVariable Long id, @RequestBody Paciente paciente){
+    public EntityModel<Paciente> actualizarPaciente(@PathVariable Long id, @RequestBody Paciente paciente){
         // Valida que el paciente exista
         Optional<Paciente> pacienteBuscado = pacienteService.getPacienteById(id);
         if(pacienteBuscado.isEmpty()){
             log.error("No se encontro ningun Paciente con ese ID {} ", id);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("No se encontro ningun Paciente con ese ID"));
+            throw new BadRequestException("No se encontro ningun Paciente con ese ID");
         }
 
         // validaciones adicionales Paciente
-        if(paciente.getNombre() == null){
+        if(paciente.getNombre() == null || paciente.getNombre().isEmpty()){
             log.error("El Nombre Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar el nombre del paciente"));
+            throw new BadRequestException("Debe ingresar el nombre del paciente");
         }
 
         // se valida que el campo Rut no este vacio
-        if(paciente.getRut() == null){
+        if(paciente.getRut() == null || paciente.getRut().isEmpty()){
             log.error("El Rut del Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar el rut del paciente"));
+            throw new BadRequestException("Debe ingresar el rut del paciente");
         }
 
          // se valida que el campo dirección no este vacio
-        if(paciente.getDireccion() == null){
+        if(paciente.getDireccion() == null || paciente.getDireccion().isEmpty()){
             log.error("La dirección del Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar la direccion del paciente"));
+            throw new BadRequestException("Debe ingresar la direccion del paciente");
         }
 
          // se valida que el campo fecha de nacimiento no este vacio
         if(paciente.getFechaNacimeinto() == null){
             log.error("La fecha de nacimiento del  Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar la fecha de nacimiento del paciente"));
+            throw new BadRequestException("Debe ingresar la fecha de nacimiento del paciente");
         }
 
          // se valida que el campo correo no este vacio
-         if(paciente.getCorreo() == null){
+         if(paciente.getCorreo() == null || paciente.getCorreo().isEmpty()){
             log.error("El correo del Paciente esta vacio");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("Debe ingresar el correo del paciente"));
+            throw new BadRequestException("Debe ingresar el correo del paciente");
         }
 
         //Preservar Atenciones y Consultas
@@ -199,7 +251,9 @@ public class ConsultorioController {
         pacienteActual.setCorreo(paciente.getCorreo());
 
         Paciente u = pacienteService.actualizarPaciente(id, pacienteActual);
-        return ResponseEntity.ok(u);
+        return EntityModel.of(u,
+        WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getPacienteById(id)).withSelfRel(),
+        WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(this.getClass()).getPacientes()).withRel("all-pacientes"));
     
     }
 

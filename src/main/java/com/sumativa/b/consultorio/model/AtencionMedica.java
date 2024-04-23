@@ -2,6 +2,8 @@ package com.sumativa.b.consultorio.model;
 
 import java.util.Date;
 
+import org.springframework.hateoas.RepresentationModel;
+
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -15,7 +17,7 @@ import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "Atencion_Medica")
-public class AtencionMedica {
+public class AtencionMedica extends RepresentationModel<AtencionMedica>{
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id_atencion")
